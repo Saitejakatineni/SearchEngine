@@ -4,172 +4,150 @@ from collections import Counter
 import numpy as np
 from nltk.corpus import stopwords
 from nltk import PorterStemmer
-
-#import pysolr
-import json
 from tqdm import tqdm
 
 porter_stemmer = PorterStemmer()
 stop_words = set(stopwords.words('english'))
 
-def tokenize_text(text):
-    """
-    Args:
-        text(str): a string of text
 
-    Return:
-        tokens(list): a list of cleaned tokens
-    """
-    tokens = []
-    text = re.sub(r'[\n]', ' ', text) # remove enters
-    text = re.sub(r'[,-]', ' ', text) # remove comma and dash
-    text = re.sub('[0-9]', '', text) # remove all numbers
-    text = re.sub(r'[^\W\w\s]', '', text) # only keep A-Za-z_ and space
+def tokenize_text(text):
+    """Return a list of lowercase, stop-word-free alphabetic tokens."""
+    text = re.sub(r'[\n,-]', ' ', text)        # newlines, commas, dashes → space
+    text = re.sub(r'[^A-Za-z\s]', '', text)    # strip everything non-alpha
     text = text.lower()
-    tkns = text.split()
-    # double check, remove empty tokens, stop words, and full numeric tokens
-    tokens = [token for token in tkns if token not in stop_words and token != '' and not token.isnumeric()]
-    return tokens
+    return [t for t in text.split() if t and t not in stop_words]
+
 
 def make_stem_map(vocab):
     """
     Args:
-        vocab(list): a list of vocabulary
+        vocab: iterable of token strings
 
     Returns:
-        token_2_stem(dict): a map from token to its stem having structure {token:stem}
-        stem_2_tokens(dict): a map from stem to its corresponding tokens having structure:
-                             {stem:set(token_1, token_2, ...)}
+        token_2_stem: {token: stem}
+        stem_2_tokens: {stem: set(tokens)}
     """
-    token_2_stem = {} # 1 to 1
-    stem_2_tokens = {} # 1 to n
-
+    token_2_stem  = {}
+    stem_2_tokens = {}
     for token in vocab:
         stem = porter_stemmer.stem(token)
-        if stem not in stem_2_tokens:
-            stem_2_tokens[stem] = set()
-        stem_2_tokens[stem].add(token)
+        stem_2_tokens.setdefault(stem, set()).add(token)
         token_2_stem[token] = stem
+    return token_2_stem, stem_2_tokens
 
-    return token_2_stem, stem_2_tokens 
 
 def get_metric_clusters(doc_tokens, token_2_stem, stem_2_tokens, query):
     """
+    Build a stem-level co-occurrence matrix weighted by inverse count-difference,
+    then pick the top-2 co-occurring stems for each query token.
+
+    The contribution of a (token_i, token_j) pair within a document is:
+        1 / |count_i - count_j|   (only when stems differ and counts differ)
+
     Args:
-        doc_tokens(2-D list): tokens in each documents having structure:
-                              [[token_1, token_2, ...], [...], ...]
-        token_2_stem(dict): a map from token to its stem having structure {token:stem}
-        stem_2_tokens(dict): a map from stem to its corresponding tokens having structure:
-                             {stem:set(token_1, token_2, ...)}
-        query(list): a list of tokens from query
-        
-    Return:
-        query_expands(list): list of expand stem tokens ids for each token in the query
+        doc_tokens:    list of token lists, one per document
+        token_2_stem:  {token: stem}
+        stem_2_tokens: {stem: set(tokens)}
+        query:         list of query tokens
+
+    Returns:
+        list of stem strings to use as query expansions
     """
-    # build map from stem to index
-    stems = stem_2_tokens.keys()
-    stems = list(sorted(stems))
-    stem_2_idx = {s:i for i, s in enumerate(stems)}
+    stems     = sorted(stem_2_tokens.keys())
+    stem_2_idx = {s: i for i, s in enumerate(stems)}
+    n_stems   = len(stems)
 
-    # print('Vocab:', token_2_stem.keys())
-    # print('Stems:', stem_2_idx.keys())
+    stem_len = np.array([len(stem_2_tokens[s]) for s in stems])  # number of variant forms
 
-    # count the number of variants for each stem
-    stem_len = [len(stem_2_tokens[s]) for s in stems]
-    stem_len = np.array(stem_len)
+    # Co-occurrence matrix: c[i, j] accumulates 1/|count_i - count_j| contributions
+    c = np.zeros((n_stems, n_stems), dtype=np.float64)
 
-    # build correlation matrix
-    c = np.zeros((len(stem_2_idx), len(stem_2_idx)), dtype=np.int)
-    for doc_id, tokens in enumerate(doc_tokens):
-        tokens_count = Counter(tokens)
-        # for each documents, count the difference between each pair of tokens
-        # and add them to their corresponding stems
-        for token_1, count_1 in tokens_count.items():
-            stem_1 = token_2_stem[token_1]
-            stem_1_id = stem_2_idx[stem_1]
-            for token_2, count_2 in tokens_count.items():
-                stem_2 = token_2_stem[token_2]
-                stem_2_id = stem_2_idx[stem_2]
-                if stem_1 == stem_2:
-                    continue
-                if count_1 != count_2:
-                    c[stem_1_id, stem_2_id] += 1. / abs(count_1 - count_2)
+    for tokens in doc_tokens:
+        if not tokens:
+            continue
 
-    # normalize correlation matrix and pick the top 3 expansion tokens
-    query_expands_id = []
+        # Count occurrences of each unique token in this document
+        token_counts = Counter(tokens)
+
+        # Build parallel arrays: one entry per unique token
+        stem_ids = []
+        counts   = []
+        for token, count in token_counts.items():
+            if token not in token_2_stem:
+                continue
+            stem_ids.append(stem_2_idx[token_2_stem[token]])
+            counts.append(float(count))
+
+        if len(stem_ids) < 2:
+            continue
+
+        stem_ids = np.array(stem_ids)
+        counts   = np.array(counts)
+        n_tok    = len(stem_ids)
+
+        # Pairwise |count_i - count_j| — shape (n_tok, n_tok)
+        diff = np.abs(counts[:, None] - counts[None, :])
+
+        # Contribution is 1/diff where counts differ AND stems differ
+        same_stem = stem_ids[:, None] == stem_ids[None, :]
+        valid     = (diff > 0) & ~same_stem
+        contrib   = np.where(valid, 1.0 / np.where(diff > 0, diff, 1.0), 0.0)
+
+        # Scatter contributions into the stem-level matrix.
+        # rows[k] / cols[k] give the (stem_i, stem_j) index for contrib.ravel()[k].
+        rows = np.repeat(stem_ids, n_tok)
+        cols = np.tile(stem_ids, n_tok)
+        np.add.at(c, (rows, cols), contrib.ravel())
+
+    # For each query token, pick the top-2 co-occurring stems (normalized by stem variant count)
+    query_expand_ids = []
     for token in query:
-        stem = token_2_stem[token]
-        stem_id = stem_2_idx[stem]
+        if token not in token_2_stem:
+            continue
+        stem_id = stem_2_idx[token_2_stem[token]]
 
-        # normalize correlation matrix
-        s_stem = c[stem_id, :] / (stem_len[stem_id] * stem_len)
+        scores   = c[stem_id, :] / (stem_len[stem_id] * stem_len)
+        top2_ids = np.argsort(scores)[::-1][:2]
+        query_expand_ids.extend(top2_ids.tolist())
 
-        # pick the top 3 stems for each query token
-        s_stem = np.argsort(s_stem)[::-1] # sort decreasing by score
-        s_stem = s_stem[:2]
-        query_expands_id.extend(s_stem.tolist())
+    return [stems[i] for i in query_expand_ids]
 
-    # convert stem ids to stem
-    query_expands = []
-    for stem_idx in query_expands_id:
-        query_expands.append(stems[stem_idx])
-
-    return query_expands
 
 def metric_cluster_main(query, solr_results):
     """
+    Expand a query using metric-based term clustering.
+
     Args:
-        query(str): a text string of query
-        solr_results(list): result for the query from function 'get_results_from_solr'
+        query:        raw query string (may be prefixed with "content:")
+        solr_results: iterable of Solr result dicts
 
-    Return:
-        query(str): a text string of expanded query
+    Returns:
+        expanded query string prefixed with "content:"
     """
-    # query = 'olympic medal'
-    # solr = pysolr.Solr('http://localhost:8983/solr/nutch/', always_commit=True, timeout=10)
-    # results = get_results_from_solr(query, solr)
-    vocab = set()
-    doc_tokens = []
-
-    # tokenize query and query results, then build stem
-    if 'content:' == query[:8]:
+    if query.startswith('content:'):
         query = query[8:]
-    query_text = query
-    query = tokenize_text(query)
-    vocab.update(query)
+
+    query_tokens = tokenize_text(query)
+
+    vocab      = set(query_tokens)
+    doc_tokens = []
     for result in tqdm(solr_results, desc='Preprocessing results'):
-        if 'content' not in result:
-            tokens = []
-        else:
-            tokens = tokenize_text(result['content'])
+        raw = result.get('content', '')
+        if isinstance(raw, list):
+            raw = ' '.join(raw)
+        tokens = tokenize_text(raw) if raw else []
         doc_tokens.append(tokens)
         vocab.update(tokens)
 
-    vocab = list(sorted(vocab))
-    token_2_stem, stem_2_tokens = make_stem_map(vocab)
+    token_2_stem, stem_2_tokens = make_stem_map(sorted(vocab))
 
-    # expand query
-    query_expands_stem = get_metric_clusters(doc_tokens, token_2_stem, stem_2_tokens, query)
-    # convert from stem to tokens
-    query_expands = set()
-    for stem in query_expands_stem:
-        query_expands.update(list(stem_2_tokens[stem]))
-    # generate new query
-    for token in query:
-        query_expands.discard(token)
-    query.extend(list(query_expands))
-    query = ' '.join(query)
+    expand_stems  = get_metric_clusters(doc_tokens, token_2_stem, stem_2_tokens, query_tokens)
+    expand_tokens = set()
+    for stem in expand_stems:
+        expand_tokens.update(stem_2_tokens[stem])
+    expand_tokens -= set(query_tokens)   # don't repeat original query terms
 
-    print('Expanded query:', query)
-    query = 'content:' + query
-
-
-    return query
-
-# if __name__ == '__main__':
-#     json_path = './output.json'
-#     with open(json_path, 'r', encoding='utf-8') as f:
-#         results = json.load(f)
-#     print('total number of results:', len(results['response']['docs']))
-#     metric_cluster_main('Audi', results['response']['docs'][:10])
-
+    all_tokens    = query_tokens + list(expand_tokens)
+    expanded      = ' '.join(all_tokens)
+    print('Expanded query:', expanded)
+    return 'content:' + expanded

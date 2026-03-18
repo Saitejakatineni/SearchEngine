@@ -1,86 +1,102 @@
+const BASE_URL = "http://127.0.0.1:5000/api/v1/indexer";
 
-var BASE_URL = "http://127.0.0.1:5000//api/v1/indexer"
-var data = [];
+// ── DOM refs ──────────────────────────────────────────────────────
+const userInput      = () => document.getElementById("UserInput").value.trim();
+const resultsList    = document.getElementById("resultsList");
+const resultsSection = document.getElementById("resultsSection");
+const compareSection = document.getElementById("compareSection");
+const expandedQuery  = document.getElementById("expandedQuery");
+const searchBtn      = document.getElementById("searchBtn");
 
-function customEngine(input) {
-    var spasIFrame = document.getElementById("spas").contentWindow.document;
+// ── Helpers ───────────────────────────────────────────────────────
 
-    let frameElement = document.getElementById("spas");
-    let doc = frameElement.contentDocument;
-    doc.body.innerHTML = doc.body.innerHTML + '<style>a {margin: 0px 0px 0px 0px;}</style>';
-
-    spasIFrame.open();
-
-    var out = "";
-    var i;
-     for(i = 0; i < data.length; i++) {
-         out += '<a href="' + data[i].url + '">' +
-         data[i].title + '</a><br>' + "<p>" + data[i].url + "<br>" +
-         data[i].meta_info +"</p>";
-    }
-    spasIFrame.write(out);
-
-    spasIFrame.close();
+function selectedType() {
+  const checked = document.querySelector('input[name="type"]:checked');
+  return checked ? checked.value : "page_rank";
 }
 
-function queryToGoogleBing() {
-    var input = document.getElementById("UserInput").value;
-    document.getElementById("google").src = "https://www.google.com/search?igu=1&source=hp&ei=lheWXriYJ4PktQXN-LPgDA&q=" + input;
-    document.getElementById("bing").src = "https://www.bing.com/search?q=" + input;
+function setLoading(on) {
+  searchBtn.disabled = on;
+  searchBtn.textContent = on ? "Searching…" : "Search";
+  if (on) {
+    resultsList.innerHTML = `
+      <div class="state-msg">
+        <div class="spinner"></div>
+        Searching…
+      </div>`;
+    resultsSection.hidden = false;
+  }
 }
+
+function renderResults(results, query) {
+  expandedQuery.textContent = query ? `— expanded: "${query}"` : "";
+
+  if (!results || results.length === 0) {
+    resultsList.innerHTML = `<div class="state-msg">No results found. Try a different query.</div>`;
+    return;
+  }
+
+  resultsList.innerHTML = results.map((r, i) => `
+    <div class="result-card">
+      <div class="result-rank">#${r.rank || i + 1}</div>
+      <div class="result-title">
+        <a href="${escHtml(r.url)}" target="_blank" rel="noopener">${escHtml(r.title) || "Untitled"}</a>
+      </div>
+      <div class="result-url">${escHtml(r.url)}</div>
+      ${r.meta_info ? `<div class="result-snippet">${escHtml(r.meta_info)}</div>` : ""}
+    </div>
+  `).join("");
+}
+
+function escHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// ── Main search ───────────────────────────────────────────────────
 
 function search() {
-    var input = document.getElementById("UserInput").value;
-    var input = 'content:'+ '' + input
-    var page_rank = document.getElementById("page_rank").checked;
-    var hits = document.getElementById("hits").checked;
-    var flat_clustering = document.getElementById("flat_clustering").checked;
-    var hierarchical_clustering = document.getElementById("hierarchical_clustering").checked;
-    var dummy_clustering = document.getElementById("dummy_clustering").checked;
-    var association_qe = document.getElementById("association_qe").checked;
-    var metric_qe = document.getElementById("metric_qe").checked;
-    var scalar_qe = document.getElementById("scalar_qe").checked;
-    var type;
+  const raw = userInput();
+  if (!raw) return;
 
-    if (page_rank) {
-        type = "page_rank";
-    }
-    else if (hits) {
-        type = "hits";
-    }
-    else if (flat_clustering) {
-        type = "flat_clustering";
-    }
-    else if (hierarchical_clustering) {
-        type = "hierarchical_clustering";
-    }
-    else if (dummy_clustering) {
-        type = "dummy_clustering";
-    }
-    else if (association_qe) {
-        type ="association_qe";
-    }
-    else if (metric_qe) {
-        type ="metric_qe";
-    }
-    else if (scalar_qe) {
-        type ="scalar_qe";
-    }
+  const query = "content:" + raw;
+  const type  = selectedType();
 
+  setLoading(true);
 
-    $.get( BASE_URL, {"query": input, "type": type})
+  $.get(BASE_URL, { query, type })
+    .done(function (resp) {
+      // For query-expansion types the backend returns the expanded query text;
+      // for others it echoes back the display query (strip "content:" prefix).
+      const displayQuery = (resp.query || "").replace(/^content:/, "");
+      const isExpanded   = displayQuery.toLowerCase() !== raw.toLowerCase();
 
-    .done(function(resp) {
-        var input = document.getElementById("UserInput");
-        input.value=resp.query;
-        data=resp.results;
-
-       
-        customEngine(input);
-
+      renderResults(resp.results, isExpanded ? displayQuery : "");
+      resultsSection.hidden = false;
     })
-    .fail(function(e) {
-
-        console.log("error", e)
+    .fail(function (xhr) {
+      resultsList.innerHTML = `
+        <div class="state-msg">
+          Error: could not reach the backend (is <code>python3 app.py</code> running?)<br>
+          <small>${xhr.status} ${xhr.statusText}</small>
+        </div>`;
+      resultsSection.hidden = false;
     })
+    .always(function () {
+      setLoading(false);
+    });
+}
+
+// ── Google / Bing comparison ──────────────────────────────────────
+
+function queryToGoogleBing() {
+  const q = userInput();
+  if (!q) return;
+  document.getElementById("google").src = `https://www.google.com/search?igu=1&q=${encodeURIComponent(q)}`;
+  document.getElementById("bing").src   = `https://www.bing.com/search?q=${encodeURIComponent(q)}`;
+  compareSection.hidden = false;
 }

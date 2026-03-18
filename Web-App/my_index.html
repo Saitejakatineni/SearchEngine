@@ -1,99 +1,135 @@
-<!doctype html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CarFind — Search Engine</title>
+  <link rel="stylesheet" href="my_style.css" />
+</head>
+<body>
 
-<html>
-  <head>
-	<meta name="author" content="TD">
-    <title>Wellness Spas Search Engine</title>
-    <link rel="stylesheet" href="my_style.css">
-  </head>
-  <body>
+  <!-- ── Nav ─────────────────────────────────────────────────────── -->
+  <header class="navbar">
+    <span class="logo">Car<span class="logo-accent">Find</span></span>
+    <nav>
+      <a href="#">Home</a>
+      <a href="#">About</a>
+      <a href="#">Contact</a>
+    </nav>
+  </header>
 
-    <script src="https://code.jquery.com/jquery-3.5.0.min.js" integrity="sha256-xNzN2a4ltkB44Mc/Jz3pT4iU1cmeR0FkXs4pru/JxaQ=" crossorigin="anonymous"></script>
-    <script src="sample_response.js"></script>
-    <script src="my_script.js"></script>
+  <!-- ── Hero / Search ────────────────────────────────────────────── -->
+  <main>
+    <section class="hero">
+      <h1>Automotive Search Engine</h1>
+      <p class="subtitle">Powered by IR techniques — ranking, clustering &amp; query expansion</p>
 
-    <header>
-      <h3>WS<sup>2</sup>E</h3>
-      <nav>
-        <ul>
-          <li><a href="#">Home</a></li>
-          <li><a href="#">About</a></li>
-          <li><a href="#">Contact</a></li>
-        </ul>
-      </nav>
-    </header>
+      <div class="search-bar">
+        <input type="text" id="UserInput" placeholder="Search for bmw, electric vehicle, formula one…" autocomplete="off" />
+        <button id="searchBtn" onclick="search(); queryToGoogleBing()">Search</button>
+      </div>
 
-    <div>
-      <h1 style="font-family: cursive;text-decoration: underline;">Wellness Spa's Search Engine</h1>
-  </div>
-    
-  <div>
-      <form id="form" onsubmit="return true;">
-          
-          <input type="text" placeholder="Type your query here..." id="UserInput"><br/>
-          <hr>
-          
-          <p id="relevance">Relevance Model Choices:</p>
-          <input type="radio" checked id="page_rank" name="type" value="page_rank">
-          <label id="page_rank_label" for="page_rank">Page Rank</label><br>
-          <input type="radio" id="hits" name="type" value="hits" class="margin">
-          <label id="hits_label" for="hits">HITS</label><br/>
-          <hr>
-          <p id="clustering">Clustering Choices:</p>
-          <input type="radio" id="flat_clustering" name="type" value="flat_clustering">
-          <label id="flat_clustering_label" for="flat_clustering">Flat Clustering</label><br>
-          <input type="radio" id="hierarchical_clustering" name="type" value="hierarchical_clustering" class="margin">
-          <label id="hierarchical_clustering_label" for="hierarchical_clustering">Agglomerative Clustering : Single Link</label><br>
-          <input type="radio" id="dummy_clustering" name="type" value="dummy_clustering" class="margin">
-          <label id="dummy_clustering_label" for="dummy_clustering"> Agglomerative Clustering : Complete Link</label><br>
-          <hr>
-          <p id="queryexp">Query Expansion Choices:</p>
-          <input type="radio" id="association_qe" name="type" value="association_qe">
-          <label id="association_qe_label" for="association_qe">Association</label><br>
-          <input type="radio" id="metric_qe" name="type" value="metric_qe">
-          <label id="metric_qe_label" for="metric_qe">Metric</label><br>
-          <input type="radio" id="scalar_qe" name="type" value="scalar_qe">
-          <label id="scalar_qe_label" for="query_expansion">Scalar</label>  
-          <br/>
-          <hr>
-          <input id="srch" type="button" value="Search" onclick="search(); queryToGoogleBing(); return false;">
-          
-          
-      </form><br/>
-  </div> 
-    
+      <!-- Options panel -->
+      <div class="options-panel">
+
+        <div class="option-group">
+          <span class="group-label">Relevance</span>
+          <label class="pill">
+            <input type="radio" name="type" value="page_rank" checked />
+            <span>Page Rank</span>
+          </label>
+          <label class="pill">
+            <input type="radio" name="type" value="hits" />
+            <span>HITS</span>
+          </label>
+        </div>
+
+        <div class="divider-v"></div>
+
+        <div class="option-group">
+          <span class="group-label">Clustering</span>
+          <label class="pill">
+            <input type="radio" name="type" value="flat_clustering" />
+            <span>Flat (K-Means)</span>
+          </label>
+          <label class="pill">
+            <input type="radio" name="type" value="hierarchical_clustering" />
+            <span>Single Link</span>
+          </label>
+          <label class="pill">
+            <input type="radio" name="type" value="dummy_clustering" />
+            <span>Complete Link</span>
+          </label>
+        </div>
+
+        <div class="divider-v"></div>
+
+        <div class="option-group">
+          <span class="group-label">Query Expansion</span>
+          <label class="pill">
+            <input type="radio" name="type" value="association_qe" />
+            <span>Association</span>
+          </label>
+          <label class="pill">
+            <input type="radio" name="type" value="metric_qe" />
+            <span>Metric</span>
+          </label>
+          <label class="pill">
+            <input type="radio" name="type" value="scalar_qe" />
+            <span>Scalar</span>
+          </label>
+        </div>
+
+      </div><!-- /options-panel -->
+    </section>
+
+    <!-- ── Results ───────────────────────────────────────────────── -->
+    <section class="results-section" id="resultsSection" hidden>
+      <div class="results-header">
+        <h2>Results <span id="expandedQuery" class="expanded-query"></span></h2>
+      </div>
+      <div id="resultsList" class="results-list"></div>
+    </section>
+
+    <!-- ── Comparison engines ────────────────────────────────────── -->
+    <section class="compare-section" id="compareSection" hidden>
+
+      <div class="compare-pane">
+        <div class="pane-header">
+          <img src="https://www.google.com/favicon.ico" width="18" alt="" />
+          Google Results
+        </div>
+        <iframe id="google" src="about:blank" title="Google Search"></iframe>
+      </div>
+
+      <div class="compare-pane">
+        <div class="pane-header">
+          <img src="https://www.bing.com/favicon.ico" width="18" alt="" />
+          Bing Results
+        </div>
+        <iframe id="bing" src="about:blank" title="Bing Search"></iframe>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- ── Footer ───────────────────────────────────────────────────── -->
+  <footer>
+    <p>CarFind &mdash; Information Retrieval Course Project &bull; Powered by Apache Solr</p>
+  </footer>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="my_script.js"></script>
+
+  <!-- Prevent form submit on Enter -->
   <script>
-      $(document).ready(function() {
-        $(window).keydown(function(event){
-          if(event.keyCode == 13) {
-            event.preventDefault();
-            return false;
-          }
-        });
-      });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        search();
+        queryToGoogleBing();
+      }
+    });
   </script>
-
-    <div>
-        <iframe id="spas" width="90%" height="500"></iframe>
-    </div><br/><br/>
-      
-    <!-- <hr style="height: 15px; border-width: 5px; color: gray; background-color: blue"> -->
-    <hr>
-      
-    <h2 style="color: black;font-size: 30px;text-decoration: underline;">Google Search</h2>
-      
-    <div>
-        <iframe id="google" src="https://www.google.com/search?igu=1&source=hp&ei=lheWXriYJ4PktQXN-LPgDA&q=" width="90%" height="500"></iframe>
-    </div><br/><br/>
-      
-    <!-- <hr style="height: 15px; border-width: 5px; color: gray; background-color: forestgreen"> -->
-    <hr>
-      
-    <h2 style="color: black;font-size: 30px;text-decoration: underline;">Bing Search</h2>
-      
-    <div>
-        <iframe id="bing" src="https://www.bing.com/search?q=" width="90%" height="500"></iframe>
-    </div>
-
-  </body>
+</body>
 </html>
